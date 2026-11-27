@@ -1,0 +1,9 @@
+node_modules
+dist
+src/core/infrastructure/database/generated
+.env
+.env.*
+npm-debug.log
+Dockerfile
+.dockerignore
+

@@ -1,0 +1,66 @@
+name: brainsync
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brainsync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brainsync}
+      POSTGRES_DB: ${POSTGRES_DB:-brainsync}
+    ports:
+      - "${DB_PORT:-5434}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      CHOKIDAR_USEPOLLING: "true"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-brainsync}:${POSTGRES_PASSWORD:-brainsync}@db:5432/${POSTGRES_DB:-brainsync}?schema=public
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    restart: unless-stopped
+    environment:
+      # Server-side only: used by Server Components / Server Actions inside the Docker network.
+      BACKEND_URL: http://backend:4000
+      # Docker bind mounts on Windows/macOS don't emit file events reliably.
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+

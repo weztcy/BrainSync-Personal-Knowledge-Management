@@ -1,0 +1,73 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/core/infrastructure/database/generated"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Origin of a tag assignment. Lets auto-save re-sync `#hashtags` without
+/// touching tags the user attached manually from the metadata panel.
+enum TagSource {
+  MANUAL
+  INLINE
+}
+
+model Note {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  /// Unique ignoring case (see migration: Note_title_lower_key). Never empty.
+  title     String   @db.VarChar(255)
+  /// Raw Markdown.
+  content   String   @default("")
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tags     NoteTag[]
+  /// Links written in this note (this note is the source).
+  linksOut NoteLink[] @relation("LinkSource")
+  /// Backlinks: links in other notes pointing at this note.
+  linksIn  NoteLink[] @relation("LinkTarget")
+
+  @@index([updatedAt(sort: Desc)])
+  // pg_trgm indexes for fuzzy search; created in the init migration.
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "Note_title_trgm_idx")
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin, map: "Note_content_trgm_idx")
+}
+
+model Tag {
+  id    String @id @default(uuid(7)) @db.Uuid
+  /// Stored lowercase (see migration CHECK constraint).
+  name  String @unique @db.VarChar(100)
+  notes NoteTag[]
+
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Tag_name_trgm_idx")
+}
+
+model NoteTag {
+  noteId String    @db.Uuid
+  tagId  String    @db.Uuid
+  source TagSource @default(MANUAL)
+
+  note Note @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, tagId])
+  @@index([tagId])
+}
+
+/// Junction table that represents the knowledge graph: source note links to target note.
+model NoteLink {
+  sourceNoteId String @db.Uuid
+  targetNoteId String @db.Uuid
+
+  sourceNote Note @relation("LinkSource", fields: [sourceNoteId], references: [id], onDelete: Cascade)
+  targetNote Note @relation("LinkTarget", fields: [targetNoteId], references: [id], onDelete: Cascade)
+
+  @@id([sourceNoteId, targetNoteId])
+  @@index([targetNoteId])
+}
+
